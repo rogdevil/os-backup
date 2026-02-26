@@ -129,18 +129,45 @@ backup_apt() {
         log_info "Saved $source_count custom APT source files"
     fi
 
-    # Save keyrings
+    # Save keyrings from /etc/apt/keyrings/
     if [[ -d /etc/apt/keyrings ]] && [[ -n "$(ls -A /etc/apt/keyrings 2>/dev/null)" ]]; then
         mkdir -p "$BACKUP_DIR/apt/keyrings"
         cp -a /etc/apt/keyrings/* "$BACKUP_DIR/apt/keyrings/"
-        log_info "Backed up APT keyrings"
+        log_info "Backed up /etc/apt/keyrings/"
     fi
 
-    # Also check for GPG keys in trusted.gpg.d
+    # Save GPG keys from trusted.gpg.d/
     if [[ -d /etc/apt/trusted.gpg.d ]] && [[ -n "$(ls -A /etc/apt/trusted.gpg.d 2>/dev/null)" ]]; then
         mkdir -p "$BACKUP_DIR/apt/trusted.gpg.d"
         cp -a /etc/apt/trusted.gpg.d/* "$BACKUP_DIR/apt/trusted.gpg.d/"
-        log_info "Backed up APT trusted GPG keys"
+        log_info "Backed up /etc/apt/trusted.gpg.d/"
+    fi
+
+    # Save legacy trusted.gpg keyring (used by repos without [signed-by=])
+    if [[ -f /etc/apt/trusted.gpg ]]; then
+        cp -a /etc/apt/trusted.gpg "$BACKUP_DIR/apt/trusted.gpg"
+        log_info "Backed up /etc/apt/trusted.gpg"
+    fi
+
+    # Save keyrings from /usr/share/keyrings/ (non-Ubuntu ones only)
+    if [[ -d /usr/share/keyrings ]]; then
+        mkdir -p "$BACKUP_DIR/apt/share-keyrings"
+        local kr_count=0
+        for f in /usr/share/keyrings/*; do
+            [[ -f "$f" ]] || continue
+            local name
+            name=$(basename "$f")
+            # Skip Ubuntu/Debian default keyrings
+            if [[ "$name" == ubuntu-* ]] || [[ "$name" == debian-* ]]; then
+                continue
+            fi
+            cp -a "$f" "$BACKUP_DIR/apt/share-keyrings/"
+            log_info "Backed up /usr/share/keyrings/$name"
+            kr_count=$((kr_count + 1))
+        done
+        if [[ $kr_count -gt 0 ]]; then
+            log_info "Saved $kr_count custom keyrings from /usr/share/keyrings/"
+        fi
     fi
 }
 

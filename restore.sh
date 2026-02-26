@@ -231,16 +231,30 @@ restore_config() {
 restore_apt_sources() {
     log_section "APT Sources & Keyrings"
 
-    # Restore keyrings
+    # Restore /etc/apt/keyrings/
     if [[ -d "$BACKUP_DIR/apt/keyrings" ]]; then
         sudo mkdir -p /etc/apt/keyrings
         sudo cp -a "$BACKUP_DIR/apt/keyrings/"* /etc/apt/keyrings/ 2>/dev/null || true
-        log_info "Restored APT keyrings"
+        log_info "Restored /etc/apt/keyrings/"
     fi
 
+    # Restore /etc/apt/trusted.gpg.d/
     if [[ -d "$BACKUP_DIR/apt/trusted.gpg.d" ]]; then
         sudo cp -a "$BACKUP_DIR/apt/trusted.gpg.d/"* /etc/apt/trusted.gpg.d/ 2>/dev/null || true
-        log_info "Restored APT trusted GPG keys"
+        log_info "Restored /etc/apt/trusted.gpg.d/"
+    fi
+
+    # Restore legacy /etc/apt/trusted.gpg
+    if [[ -f "$BACKUP_DIR/apt/trusted.gpg" ]]; then
+        sudo cp -a "$BACKUP_DIR/apt/trusted.gpg" /etc/apt/trusted.gpg
+        log_info "Restored /etc/apt/trusted.gpg"
+    fi
+
+    # Restore /usr/share/keyrings/ (custom keyrings like doppler-archive-keyring.gpg)
+    if [[ -d "$BACKUP_DIR/apt/share-keyrings" ]]; then
+        sudo mkdir -p /usr/share/keyrings
+        sudo cp -a "$BACKUP_DIR/apt/share-keyrings/"* /usr/share/keyrings/ 2>/dev/null || true
+        log_info "Restored custom keyrings to /usr/share/keyrings/"
     fi
 
     # Restore custom source lists
