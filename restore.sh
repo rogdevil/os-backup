@@ -307,6 +307,82 @@ restore_apt_packages() {
     }
 }
 
+restore_snap_packages() {
+    log_section "Snap Packages"
+    if [[ ! -f "$BACKUP_DIR/snap/packages.list" ]]; then
+        log_skip "No snap package list found"
+        return
+    fi
+
+    if ! command -v snap &>/dev/null; then
+        log_warn "snap not found — installing snapd"
+        sudo apt-get install -y snapd || {
+            log_error "Failed to install snapd, skipping snap packages"
+            return
+        }
+    fi
+
+    while IFS=' ' read -r pkg channel; do
+        [[ -z "$pkg" ]] && continue
+        if snap list "$pkg" &>/dev/null; then
+            log_skip "snap: $pkg already installed"
+        else
+            log_info "Installing snap: $pkg"
+            # Try classic confinement first (common for dev tools), fall back to strict
+            sudo snap install "$pkg" --classic 2>/dev/null || \
+                sudo snap install "$pkg" 2>/dev/null || \
+                log_warn "Failed to install snap: $pkg"
+        fi
+    done < "$BACKUP_DIR/snap/packages.list"
+}
+
+restore_brew_packages() {
+    log_section "Homebrew Packages"
+    local has_formulae=false
+    local has_casks=false
+    [[ -f "$BACKUP_DIR/brew/formulae.list" ]] && [[ -s "$BACKUP_DIR/brew/formulae.list" ]] && has_formulae=true
+    [[ -f "$BACKUP_DIR/brew/casks.list" ]] && [[ -s "$BACKUP_DIR/brew/casks.list" ]] && has_casks=true
+
+    if [[ "$has_formulae" == false ]] && [[ "$has_casks" == false ]]; then
+        log_skip "No Homebrew package lists found"
+        return
+    fi
+
+    if ! command -v brew &>/dev/null; then
+        log_info "Installing Homebrew..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || {
+            log_error "Failed to install Homebrew, skipping brew packages"
+            return
+        }
+        # Add brew to PATH for this session
+        eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv 2>/dev/null || true)"
+    fi
+
+    if [[ "$has_formulae" == true ]]; then
+        while IFS= read -r pkg; do
+            [[ -z "$pkg" ]] && continue
+            if brew list "$pkg" &>/dev/null; then
+                log_skip "brew: $pkg already installed"
+            else
+                log_info "Installing brew formula: $pkg"
+                brew install "$pkg" || log_warn "Failed to install $pkg"
+            fi
+        done < "$BACKUP_DIR/brew/formulae.list"
+    fi
+
+    if [[ "$has_casks" == true ]]; then
+        while IFS= read -r pkg; do
+            [[ -z "$pkg" ]] && continue
+            if brew list --cask "$pkg" &>/dev/null; then
+                log_skip "brew cask: $pkg already installed"
+            else
+                log_info "Installing brew cask: $pkg"
+                brew install --cask "$pkg" || log_warn "Failed to install cask $pkg"
+            fi
+        done < "$BACKUP_DIR/brew/casks.list"
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Phase 3: Dev tools
 # ---------------------------------------------------------------------------
@@ -501,6 +577,22 @@ install_opencode() {
     curl -fsSL https://opencode.ai/install | bash || log_warn "OpenCode install failed"
 }
 
+install_brave() {
+    log_section "Brave Browser"
+    if command -v brave-browser &>/dev/null; then
+        log_skip "Brave already installed"
+        return
+    fi
+
+    log_info "Installing Brave Browser..."
+    curl -fsSL https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg \
+        | sudo tee /usr/share/keyrings/brave-browser-archive-keyring.gpg >/dev/null
+    echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" \
+        | sudo tee /etc/apt/sources.list.d/brave-browser-release.list >/dev/null
+    sudo apt-get update -qq
+    sudo apt-get install -y brave-browser || log_warn "Failed to install Brave Browser"
+}
+
 # ---------------------------------------------------------------------------
 # Phase 5: Remaining
 # ---------------------------------------------------------------------------
@@ -535,6 +627,60 @@ restore_local_bin() {
         while IFS= read -r line; do
             log_info "  $line"
         done < "$BACKUP_DIR/local-bin/symlinks.txt"
+    fi
+}
+
+restore_go_bin() {
+    log_section "Go Binaries (~/go/bin)"
+    if [[ -d "$BACKUP_DIR/go-bin" ]]; then
+        mkdir -p "$HOME/go/bin"
+        local count=0
+        for f in "$BACKUP_DIR/go-bin/"*; do
+            [[ -f "$f" ]] || continue
+            local name
+            name=$(basename "$f")
+            if [[ -f "$HOME/go/bin/$name" ]]; then
+                log_skip "$name already exists in ~/go/bin"
+            else
+                cp -a "$f" "$HOME/go/bin/$name"
+                chmod +x "$HOME/go/bin/$name"
+                log_info "Restored ~/go/bin/$name"
+            fi
+            count=$((count + 1))
+        done
+        log_info "Processed $count Go binaries"
+    else
+        log_skip "No Go binaries backup found"
+    fi
+}
+
+restore_usr_local_bin() {
+    log_section "System Binaries (/usr/local/bin)"
+    if [[ -d "$BACKUP_DIR/usr-local-bin/files" ]]; then
+        local count=0
+        for f in "$BACKUP_DIR/usr-local-bin/files/"*; do
+            [[ -f "$f" ]] || continue
+            local name
+            name=$(basename "$f")
+            if [[ -f "/usr/local/bin/$name" ]]; then
+                log_skip "$name already exists in /usr/local/bin"
+            else
+                sudo cp -a "$f" "/usr/local/bin/$name"
+                sudo chmod +x "/usr/local/bin/$name"
+                log_info "Restored /usr/local/bin/$name"
+            fi
+            count=$((count + 1))
+        done
+        log_info "Processed $count binaries"
+    else
+        log_skip "No /usr/local/bin backup found"
+    fi
+
+    if [[ -f "$BACKUP_DIR/usr-local-bin/symlinks.txt" ]]; then
+        log_info "Symlinks from backup (may need manual recreation):"
+        while IFS= read -r line; do
+            log_info "  $line"
+        done < "$BACKUP_DIR/usr-local-bin/symlinks.txt"
     fi
 }
 
@@ -632,9 +778,11 @@ print(f\"  Contents: {', '.join(m['contents'])}\")
     restore_ohmybash
     restore_config
 
-    # Phase 2: APT
+    # Phase 2: Package managers
     restore_apt_sources
     restore_apt_packages
+    restore_snap_packages
+    restore_brew_packages
 
     # Phase 3: Dev tools
     install_nvm_node
@@ -649,9 +797,12 @@ print(f\"  Contents: {', '.join(m['contents'])}\")
     install_fly
     install_temporal
     install_opencode
+    install_brave
 
     # Phase 5: Remaining
     restore_local_bin
+    restore_go_bin
+    restore_usr_local_bin
     restore_tool_configs
     show_pip_reference
 

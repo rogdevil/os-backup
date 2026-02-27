@@ -183,6 +183,36 @@ backup_pip() {
     fi
 }
 
+backup_snap() {
+    log_section "Snap Packages"
+    if command -v snap &>/dev/null; then
+        mkdir -p "$BACKUP_DIR/snap"
+        # Save list of explicitly installed snaps (skip base snaps and snapd itself)
+        snap list 2>/dev/null | awk 'NR>1 && $1!="bare" && $1!="core"&& $1!="core18" && $1!="core20" && $1!="core22" && $1!="core24" && $1!="snapd" && $1!="gnome-" {print $1, $4}' \
+            > "$BACKUP_DIR/snap/packages.list"
+        local count
+        count=$(wc -l < "$BACKUP_DIR/snap/packages.list")
+        log_info "Saved $count snap packages"
+    else
+        log_warn "snap not found, skipping"
+    fi
+}
+
+backup_brew() {
+    log_section "Homebrew Packages"
+    if command -v brew &>/dev/null; then
+        mkdir -p "$BACKUP_DIR/brew"
+        brew leaves > "$BACKUP_DIR/brew/formulae.list" 2>/dev/null || true
+        brew list --cask > "$BACKUP_DIR/brew/casks.list" 2>/dev/null || true
+        local formula_count cask_count
+        formula_count=$(wc -l < "$BACKUP_DIR/brew/formulae.list")
+        cask_count=$(wc -l < "$BACKUP_DIR/brew/casks.list")
+        log_info "Saved $formula_count formulae, $cask_count casks"
+    else
+        log_warn "Homebrew not found, skipping"
+    fi
+}
+
 backup_npm() {
     log_section "NPM Global Packages"
     if command -v npm &>/dev/null; then
@@ -230,6 +260,51 @@ backup_local_bin() {
         log_info "Backed up $file_count files, recorded $symlink_count symlinks"
     else
         log_warn "~/.local/bin not found"
+    fi
+}
+
+backup_go_bin() {
+    log_section "Go Binaries (~/go/bin)"
+    if [[ -d "$HOME/go/bin" ]]; then
+        mkdir -p "$BACKUP_DIR/go-bin"
+        local count=0
+        for f in "$HOME/go/bin/"*; do
+            [[ -f "$f" ]] || continue
+            cp -a "$f" "$BACKUP_DIR/go-bin/"
+            log_info "Backed up ~/go/bin/$(basename "$f")"
+            count=$((count + 1))
+        done
+        log_info "Backed up $count Go binaries"
+    else
+        log_warn "~/go/bin not found"
+    fi
+}
+
+backup_usr_local_bin() {
+    log_section "System Binaries (/usr/local/bin)"
+    if [[ -d /usr/local/bin ]]; then
+        mkdir -p "$BACKUP_DIR/usr-local-bin/files"
+        local file_count=0
+        local symlink_count=0
+        for entry in /usr/local/bin/*; do
+            [[ -e "$entry" ]] || continue
+            local name
+            name=$(basename "$entry")
+            if [[ -L "$entry" ]]; then
+                # Record symlinks (e.g. Docker Desktop managed) but don't copy
+                local target
+                target=$(readlink "$entry")
+                echo "$name -> $target" >> "$BACKUP_DIR/usr-local-bin/symlinks.txt"
+                symlink_count=$((symlink_count + 1))
+            elif [[ -f "$entry" ]]; then
+                cp -a "$entry" "$BACKUP_DIR/usr-local-bin/files/"
+                log_info "Backed up /usr/local/bin/$name"
+                file_count=$((file_count + 1))
+            fi
+        done
+        log_info "Backed up $file_count files, recorded $symlink_count symlinks"
+    else
+        log_warn "/usr/local/bin not found"
     fi
 }
 
@@ -366,9 +441,13 @@ main() {
     backup_ohmybash
     backup_config
     backup_apt
+    backup_snap
+    backup_brew
     backup_pip
     backup_npm
     backup_local_bin
+    backup_go_bin
+    backup_usr_local_bin
     backup_tools
     backup_versions
 
