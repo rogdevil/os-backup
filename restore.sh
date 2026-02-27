@@ -504,6 +504,50 @@ install_docker() {
     log_info "Docker installed. You may need to log out and back in for group membership."
 }
 
+install_docker_desktop() {
+    log_section "Docker Desktop"
+
+    # Skip on WSL2 — Docker Desktop runs from the Windows side
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        log_skip "WSL2 detected — install Docker Desktop from Windows instead"
+        return
+    fi
+
+    if dpkg -l docker-desktop 2>/dev/null | grep -q "^ii"; then
+        log_skip "Docker Desktop already installed"
+        return
+    fi
+
+    log_info "Downloading Docker Desktop..."
+    local deb_url="https://desktop.docker.com/linux/main/amd64/docker-desktop-amd64.deb"
+    curl -fsSL "$deb_url" -o /tmp/docker-desktop-amd64.deb || {
+        log_warn "Failed to download Docker Desktop"
+        return
+    }
+
+    log_info "Installing Docker Desktop..."
+    sudo apt-get install -y /tmp/docker-desktop-amd64.deb || {
+        # Fix broken dependencies and retry
+        sudo apt-get install -f -y
+        sudo apt-get install -y /tmp/docker-desktop-amd64.deb || log_warn "Failed to install Docker Desktop"
+    }
+    rm -f /tmp/docker-desktop-amd64.deb
+    log_info "Docker Desktop installed"
+}
+
+restore_docker_config() {
+    log_section "Docker Config"
+    if [[ -d "$BACKUP_DIR/tools/docker" ]]; then
+        mkdir -p "$HOME/.docker"
+        if [[ -f "$BACKUP_DIR/tools/docker/config.json" ]]; then
+            cp -a "$BACKUP_DIR/tools/docker/config.json" "$HOME/.docker/config.json"
+            log_info "Restored ~/.docker/config.json"
+        fi
+    else
+        log_skip "No Docker config backup found"
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Phase 4: CLIs
 # ---------------------------------------------------------------------------
@@ -790,6 +834,7 @@ print(f\"  Contents: {', '.join(m['contents'])}\")
     install_pnpm
     install_go
     install_docker
+    install_docker_desktop
 
     # Phase 4: CLIs
     install_claude
@@ -803,6 +848,7 @@ print(f\"  Contents: {', '.join(m['contents'])}\")
     restore_local_bin
     restore_go_bin
     restore_usr_local_bin
+    restore_docker_config
     restore_tool_configs
     show_pip_reference
 

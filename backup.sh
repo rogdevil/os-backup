@@ -332,6 +332,16 @@ backup_tools() {
             fi
         done
     fi
+
+    # Docker config
+    if [[ -d "$HOME/.docker" ]]; then
+        mkdir -p "$BACKUP_DIR/tools/docker"
+        # Copy config.json (auth/registries) — only if it's a real file
+        if [[ -f "$HOME/.docker/config.json" ]] && [[ ! -L "$HOME/.docker/config.json" ]]; then
+            cp -a "$HOME/.docker/config.json" "$BACKUP_DIR/tools/docker/"
+            log_info "Backed up ~/.docker/config.json"
+        fi
+    fi
 }
 
 backup_versions() {
