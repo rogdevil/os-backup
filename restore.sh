@@ -515,8 +515,14 @@ install_docker_desktop() {
 
     if dpkg -l docker-desktop 2>/dev/null | grep -q "^ii"; then
         log_skip "Docker Desktop already installed"
+        # Ensure the service is enabled
+        systemctl --user enable docker-desktop 2>/dev/null || true
         return
     fi
+
+    # Install prerequisites
+    log_info "Installing Docker Desktop prerequisites..."
+    sudo apt-get install -y gnome-terminal pass uidmap 2>/dev/null || true
 
     log_info "Downloading Docker Desktop..."
     local deb_url="https://desktop.docker.com/linux/main/amd64/docker-desktop-amd64.deb"
@@ -526,13 +532,22 @@ install_docker_desktop() {
     }
 
     log_info "Installing Docker Desktop..."
+    sudo apt-get update -qq
     sudo apt-get install -y /tmp/docker-desktop-amd64.deb || {
         # Fix broken dependencies and retry
         sudo apt-get install -f -y
-        sudo apt-get install -y /tmp/docker-desktop-amd64.deb || log_warn "Failed to install Docker Desktop"
+        sudo apt-get install -y /tmp/docker-desktop-amd64.deb || {
+            log_warn "Failed to install Docker Desktop"
+            rm -f /tmp/docker-desktop-amd64.deb
+            return
+        }
     }
     rm -f /tmp/docker-desktop-amd64.deb
-    log_info "Docker Desktop installed"
+
+    # Enable and start the systemd user service
+    systemctl --user enable docker-desktop 2>/dev/null || true
+    systemctl --user start docker-desktop 2>/dev/null || true
+    log_info "Docker Desktop installed and service enabled"
 }
 
 restore_docker_config() {
