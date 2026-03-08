@@ -205,6 +205,27 @@ restore_ohmybash() {
     fi
 }
 
+restore_ohmyzsh() {
+    log_section "Oh-My-Zsh"
+    if [[ -d "$BACKUP_DIR/oh-my-zsh" ]]; then
+        # Install zsh if not present
+        if ! command -v zsh &>/dev/null; then
+            log_info "Installing zsh..."
+            sudo apt-get install -y zsh
+        fi
+        # Install Oh My Zsh if not present, or sync from backup
+        if [[ -d "$HOME/.oh-my-zsh" ]]; then
+            log_skip "Oh-My-Zsh already installed at ~/.oh-my-zsh"
+            log_info "Syncing config updates..."
+        fi
+        mkdir -p "$HOME/.oh-my-zsh"
+        rsync -a "$BACKUP_DIR/oh-my-zsh/" "$HOME/.oh-my-zsh/"
+        log_info "Restored Oh-My-Zsh"
+    else
+        log_skip "No Oh-My-Zsh backup found"
+    fi
+}
+
 restore_config() {
     log_section "Config Directories"
     if [[ -d "$BACKUP_DIR/config" ]]; then
@@ -636,6 +657,53 @@ install_opencode() {
     curl -fsSL https://opencode.ai/install | bash || log_warn "OpenCode install failed"
 }
 
+install_sonar() {
+    log_section "SonarScanner"
+    # Check if already installed
+    if command -v sonar-scanner &>/dev/null; then
+        log_skip "SonarScanner already installed"
+        # Restore config if available
+        if [[ -f "$BACKUP_DIR/sonar/sonar-scanner.properties" ]]; then
+            local scanner_dir
+            scanner_dir=$(find "$HOME" -maxdepth 1 -name "sonar-scanner-cli-*" -type d | head -1)
+            if [[ -n "$scanner_dir" ]]; then
+                cp -a "$BACKUP_DIR/sonar/sonar-scanner.properties" "$scanner_dir/conf/"
+                log_info "Restored sonar-scanner.properties"
+            fi
+        fi
+        return
+    fi
+
+    local sonar_ver="7.0.0.4796"
+    if [[ -f "$BACKUP_DIR/sonar/version.txt" ]]; then
+        sonar_ver=$(cat "$BACKUP_DIR/sonar/version.txt")
+    fi
+
+    log_info "Installing SonarScanner $sonar_ver..."
+    local zip_name="sonar-scanner-cli-${sonar_ver}-linux-x64.zip"
+    curl -fsSL "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/${zip_name}" \
+        -o "/tmp/${zip_name}" || {
+        log_warn "Failed to download SonarScanner"
+        return
+    }
+    unzip -qo "/tmp/${zip_name}" -d "$HOME/"
+    rm -f "/tmp/${zip_name}"
+
+    # Restore config
+    local scanner_dir="$HOME/sonar-scanner-cli-${sonar_ver}-linux-x64"
+    if [[ -f "$BACKUP_DIR/sonar/sonar-scanner.properties" ]]; then
+        cp -a "$BACKUP_DIR/sonar/sonar-scanner.properties" "$scanner_dir/conf/"
+        log_info "Restored sonar-scanner.properties"
+    fi
+
+    # Add to PATH via .zshrc if not already there
+    if ! grep -q 'sonar-scanner-cli' "$HOME/.zshrc" 2>/dev/null; then
+        echo "export PATH=\$PATH:~/sonar-scanner-cli-${sonar_ver}-linux-x64/bin" >> "$HOME/.zshrc"
+    fi
+
+    log_info "SonarScanner $sonar_ver installed"
+}
+
 install_brave() {
     log_section "Brave Browser"
     if command -v brave-browser &>/dev/null; then
@@ -835,6 +903,7 @@ print(f\"  Contents: {', '.join(m['contents'])}\")
     restore_ssh
     restore_dotfiles
     restore_ohmybash
+    restore_ohmyzsh
     restore_config
 
     # Phase 2: Package managers
@@ -857,6 +926,7 @@ print(f\"  Contents: {', '.join(m['contents'])}\")
     install_fly
     install_temporal
     install_opencode
+    install_sonar
     install_brave
 
     # Phase 5: Remaining

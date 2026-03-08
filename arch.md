@@ -26,8 +26,9 @@ os-backup-YYYY-MM-DD-HHMMSS/
 ├── versions.env               # KEY=VALUE tool versions (NODE_VERSION, GO_VERSION, etc.)
 ├── pip-packages.txt           # pip freeze output (reference only, not auto-restored)
 ├── ssh/                       # ~/.ssh/* (keys, config, known_hosts)
-├── dotfiles/                  # .bashrc, .profile, .bash_aliases, .bash_logout
+├── dotfiles/                  # .bashrc, .zshrc, .profile, .bash_aliases, .bash_logout
 ├── oh-my-bash/                # ~/.oh-my-bash/ minus .git/
+├── oh-my-zsh/                 # ~/.oh-my-zsh/ minus .git/, cache/, log/
 ├── config/                    # ~/.config/{git,go,gopls,opencode,astro}
 ├── apt/
 │   ├── packages.list          # apt-mark showmanual (manual installs only, ~106 pkgs)
@@ -39,6 +40,9 @@ os-backup-YYYY-MM-DD-HHMMSS/
 ├── local-bin/
 │   ├── files/                 # Real files from ~/.local/bin/
 │   └── symlinks.txt           # "name -> target" for symlinks (logged, not auto-restored)
+├── sonar/
+│   ├── sonar-scanner.properties  # SonarScanner config from $scanner_dir/conf/
+│   └── version.txt               # Installed version (e.g. 7.0.0.4796)
 └── tools/
     ├── fly/                   # ~/.fly/{config.yml, state.yml}
     └── opencode/              # ~/.opencode/{package.json, bun.lock}
@@ -67,15 +71,17 @@ Each function is independent and writes to `$BACKUP_DIR/<subdirectory>`:
 | Function | Staging subdir | Source | Notes |
 |---|---|---|---|
 | `backup_ssh` | `ssh/` | `~/.ssh/*` | `cp -a`, removes `known_hosts.old` |
-| `backup_dotfiles` | `dotfiles/` | `~/.bashrc`, `~/.profile`, `~/.bash_aliases`, `~/.bash_logout` | Only copies files that exist |
+| `backup_dotfiles` | `dotfiles/` | `~/.bashrc`, `~/.zshrc`, `~/.profile`, `~/.bash_aliases`, `~/.bash_logout` | Only copies files that exist |
 | `backup_ohmybash` | `oh-my-bash/` | `~/.oh-my-bash/` | `rsync -a --exclude='.git/'` |
+| `backup_ohmyzsh` | `oh-my-zsh/` | `~/.oh-my-zsh/` | `rsync -a --exclude='.git/' --exclude='cache/' --exclude='log/'` |
 | `backup_config` | `config/` | `~/.config/{git,go,gopls,opencode,astro}` | `cp -a` per dir |
 | `backup_apt` | `apt/` | `apt-mark showmanual`, `/etc/apt/sources.list.d/*`, keyrings | Skips `ubuntu.sources` |
 | `backup_pip` | `pip-packages.txt` | `pip list --format=freeze` | Reference only |
 | `backup_npm` | `npm/` | `npm list -g --depth=0 --json` | Parsed with python3, excludes npm/corepack |
 | `backup_local_bin` | `local-bin/` | `~/.local/bin/*` | Real files copied; symlinks recorded in `symlinks.txt` |
 | `backup_tools` | `tools/` | `~/.fly/{config,state}.yml`, `~/.opencode/{package.json,bun.lock}` | Config files only, no binaries |
-| `backup_versions` | `versions.env` | Various `--version` commands | `KEY=VALUE` format, 8 tools |
+| `backup_sonar` | `sonar/` | `~/sonar-scanner-cli-*/conf/sonar-scanner.properties` | Config + version only, re-downloads on restore |
+| `backup_versions` | `versions.env` | Various `--version` commands | `KEY=VALUE` format, 9 tools |
 
 ### Adding a New Backup Category
 
@@ -109,6 +115,7 @@ main()
   │   ├── restore_ssh()         # mkdir ~/.ssh, cp files, chmod 600/644
   │   ├── restore_dotfiles()    # cp to ~/.$name
   │   ├── restore_ohmybash()    # rsync to ~/.oh-my-bash/
+  │   ├── restore_ohmyzsh()    # install zsh if needed, rsync to ~/.oh-my-zsh/
   │   └── restore_config()      # cp -a to ~/.config/$name
   │
   ├── Phase 2: APT
@@ -127,7 +134,8 @@ main()
   │   ├── install_doppler()     # apt install or fallback cli.doppler.com/install.sh
   │   ├── install_fly()         # fly.io/install.sh
   │   ├── install_temporal()    # temporal.download/cli.sh
-  │   └── install_opencode()    # opencode.ai/install
+  │   ├── install_opencode()    # opencode.ai/install
+  │   └── install_sonar()      # Download + extract SonarScanner, restore config
   │
   ├── Phase 5: Remaining
   │   ├── restore_local_bin()   # cp files, skip claude (npm-managed), log symlinks

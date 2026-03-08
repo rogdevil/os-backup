@@ -62,7 +62,7 @@ backup_dotfiles() {
     log_section "Dotfiles"
     mkdir -p "$BACKUP_DIR/dotfiles"
     local backed=0
-    for f in "$HOME/.bashrc" "$HOME/.profile" "$HOME/.bash_aliases" "$HOME/.bash_logout"; do
+    for f in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_aliases" "$HOME/.bash_logout"; do
         if [[ -f "$f" ]]; then
             cp -a "$f" "$BACKUP_DIR/dotfiles/"
             log_info "Backed up $(basename "$f")"
@@ -82,6 +82,40 @@ backup_ohmybash() {
         log_info "Backed up Oh-My-Bash ($size)"
     else
         log_warn "Oh-My-Bash not found at ~/.oh-my-bash"
+    fi
+}
+
+backup_ohmyzsh() {
+    log_section "Oh-My-Zsh"
+    if [[ -d "$HOME/.oh-my-zsh" ]]; then
+        mkdir -p "$BACKUP_DIR/oh-my-zsh"
+        rsync -a --exclude='.git/' --exclude='cache/' --exclude='log/' "$HOME/.oh-my-zsh/" "$BACKUP_DIR/oh-my-zsh/"
+        local size
+        size=$(du -sh "$BACKUP_DIR/oh-my-zsh" | cut -f1)
+        log_info "Backed up Oh-My-Zsh ($size)"
+    else
+        log_warn "Oh-My-Zsh not found at ~/.oh-my-zsh"
+    fi
+}
+
+backup_sonar() {
+    log_section "SonarScanner"
+    local scanner_dir
+    scanner_dir=$(find "$HOME" -maxdepth 1 -name "sonar-scanner-cli-*" -type d | head -1)
+    if [[ -n "$scanner_dir" ]] && [[ -d "$scanner_dir" ]]; then
+        mkdir -p "$BACKUP_DIR/sonar"
+        # Back up config only (not the full install — too large, re-download on restore)
+        if [[ -f "$scanner_dir/conf/sonar-scanner.properties" ]]; then
+            cp -a "$scanner_dir/conf/sonar-scanner.properties" "$BACKUP_DIR/sonar/"
+            log_info "Backed up sonar-scanner.properties"
+        fi
+        # Save the version for restore
+        local version
+        version=$(basename "$scanner_dir" | grep -oP '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+')
+        echo "$version" > "$BACKUP_DIR/sonar/version.txt"
+        log_info "Backed up SonarScanner config (version $version)"
+    else
+        log_warn "SonarScanner not found in home directory"
     fi
 }
 
@@ -376,6 +410,9 @@ backup_versions() {
         if command -v pnpm &>/dev/null; then
             echo "PNPM_VERSION=$(pnpm --version 2>/dev/null || echo 'latest')"
         fi
+        if command -v sonar-scanner &>/dev/null; then
+            echo "SONAR_VERSION=$(sonar-scanner --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo 'latest')"
+        fi
     } > "$versions_file"
 
     log_info "Saved tool versions to versions.env"
@@ -449,6 +486,7 @@ main() {
     backup_ssh
     backup_dotfiles
     backup_ohmybash
+    backup_ohmyzsh
     backup_config
     backup_apt
     backup_snap
@@ -459,6 +497,7 @@ main() {
     backup_go_bin
     backup_usr_local_bin
     backup_tools
+    backup_sonar
     backup_versions
 
     # Generate manifest
